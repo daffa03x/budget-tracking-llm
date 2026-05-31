@@ -15,10 +15,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const update = (await req.json()) as TelegramUpdate;
 
-  // Process without awaiting — Telegram needs a fast <1s response
-  handleUpdate(update).catch((err) =>
-    console.error("[Telegram webhook] unhandled error:", err),
-  );
+  try {
+    await handleUpdate(update);
+  } catch (err) {
+    console.error("[Telegram webhook] unhandled error:", err);
+  }
 
   return NextResponse.json({ ok: true });
 }
