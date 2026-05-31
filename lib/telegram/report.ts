@@ -7,9 +7,12 @@ import {
   startOfMonth,
   endOfMonth,
 } from "date-fns";
+import { toZonedTime, fromZonedTime } from "date-fns-tz";
 import { prisma } from "@/lib/prisma";
 import { formatRupiah } from "./parser";
 import { syncBudgetsForExpenseChange } from "@/lib/services/budget.service";
+
+const TZ = "Asia/Jakarta";
 
 async function buildReport(
   userId: string,
@@ -66,16 +69,21 @@ async function buildReport(
 }
 
 export async function generateDailyReport(userId: string): Promise<string> {
-  const now = new Date();
-  return buildReport(userId, startOfDay(now), endOfDay(now), "Hari Ini");
+  const now = toZonedTime(new Date(), TZ);
+  return buildReport(
+    userId,
+    fromZonedTime(startOfDay(now), TZ),
+    fromZonedTime(endOfDay(now), TZ),
+    "Hari Ini",
+  );
 }
 
 export async function generateWeeklyReport(userId: string): Promise<string> {
-  const now = new Date();
+  const now = toZonedTime(new Date(), TZ);
   return buildReport(
     userId,
-    startOfWeek(now, { weekStartsOn: 1 }),
-    endOfWeek(now, { weekStartsOn: 1 }),
+    fromZonedTime(startOfWeek(now, { weekStartsOn: 1 }), TZ),
+    fromZonedTime(endOfWeek(now, { weekStartsOn: 1 }), TZ),
     "Minggu Ini",
   );
 }
@@ -85,10 +93,15 @@ export async function generateMonthlyReport(
   month?: number,
   year?: number,
 ): Promise<string> {
-  const now = new Date();
+  const now = toZonedTime(new Date(), TZ);
   const d = new Date(year ?? now.getFullYear(), month !== undefined ? month - 1 : now.getMonth(), 1);
-  const label = d.toLocaleString("id-ID", { month: "long", year: "numeric" });
-  return buildReport(userId, startOfMonth(d), endOfMonth(d), label);
+  const label = d.toLocaleString("id-ID", { month: "long", year: "numeric", timeZone: TZ });
+  return buildReport(
+    userId,
+    fromZonedTime(startOfMonth(d), TZ),
+    fromZonedTime(endOfMonth(d), TZ),
+    label,
+  );
 }
 
 export async function getRecentTransactions(
@@ -124,6 +137,7 @@ export async function getRecentTransactions(
     const date = new Date(r.date).toLocaleDateString("id-ID", {
       day: "numeric",
       month: "short",
+      timeZone: TZ,
     });
     lines.push(
       `${icon}${typeIcon} ${r.category?.name ?? "Lainnya"} — ${formatRupiah(Number(r.amount))} (${date})`,

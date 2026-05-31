@@ -238,7 +238,7 @@ async function saveAndConfirm(
   const typeIcon = parsed.type === "income" ? "💰" : "💸";
   const typeLabel = parsed.type === "income" ? "Pemasukan" : "Pengeluaran";
   const pocketLine = pocketId ? `\n💼 Kantong: ${parsed.pocketName}` : "";
-  const date = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+  const date = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Jakarta" });
 
   await sendMessage(
     chatId,
@@ -308,7 +308,7 @@ async function handleCommand(
       if (!link) {
         await sendMessage(chatId, "❌ Akun belum terhubung.");
       } else {
-        const since = link.createdAt.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+        const since = link.createdAt.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" });
         await sendMessage(chatId, `✅ <b>Status: Terhubung</b>\n👤 ${link.firstName ?? ""} (@${link.username ?? "-"})\n📅 Sejak: ${since}`);
       }
       break;
