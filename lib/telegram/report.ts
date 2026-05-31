@@ -12,13 +12,13 @@ import { formatRupiah } from "./parser";
 import { syncBudgetsForExpenseChange } from "@/lib/services/budget.service";
 
 async function buildReport(
-  chatId: string,
+  userId: string,
   from: Date,
   to: Date,
   label: string,
 ): Promise<string> {
   const rows = await prisma.transaction.findMany({
-    where: { telegramChatId: chatId, date: { gte: from, lte: to } },
+    where: { userId, date: { gte: from, lte: to } },
     select: {
       type: true,
       amount: true,
@@ -65,15 +65,15 @@ async function buildReport(
   return lines.join("\n");
 }
 
-export async function generateDailyReport(chatId: string): Promise<string> {
+export async function generateDailyReport(userId: string): Promise<string> {
   const now = new Date();
-  return buildReport(chatId, startOfDay(now), endOfDay(now), "Hari Ini");
+  return buildReport(userId, startOfDay(now), endOfDay(now), "Hari Ini");
 }
 
-export async function generateWeeklyReport(chatId: string): Promise<string> {
+export async function generateWeeklyReport(userId: string): Promise<string> {
   const now = new Date();
   return buildReport(
-    chatId,
+    userId,
     startOfWeek(now, { weekStartsOn: 1 }),
     endOfWeek(now, { weekStartsOn: 1 }),
     "Minggu Ini",
@@ -81,18 +81,18 @@ export async function generateWeeklyReport(chatId: string): Promise<string> {
 }
 
 export async function generateMonthlyReport(
-  chatId: string,
+  userId: string,
   month?: number,
   year?: number,
 ): Promise<string> {
   const now = new Date();
   const d = new Date(year ?? now.getFullYear(), month !== undefined ? month - 1 : now.getMonth(), 1);
   const label = d.toLocaleString("id-ID", { month: "long", year: "numeric" });
-  return buildReport(chatId, startOfMonth(d), endOfMonth(d), label);
+  return buildReport(userId, startOfMonth(d), endOfMonth(d), label);
 }
 
 export async function getRecentTransactions(
-  chatId: string,
+  userId: string,
   limit = 5,
 ): Promise<string> {
   const sourceIcon: Record<string, string> = {
@@ -103,7 +103,7 @@ export async function getRecentTransactions(
   };
 
   const rows = await prisma.transaction.findMany({
-    where: { telegramChatId: chatId },
+    where: { userId },
     orderBy: { createdAt: "desc" },
     take: limit,
     select: {
@@ -132,9 +132,9 @@ export async function getRecentTransactions(
   return lines.join("\n");
 }
 
-export async function deleteLastTransaction(chatId: string, userId: string): Promise<string> {
+export async function deleteLastTransaction(userId: string): Promise<string> {
   const last = await prisma.transaction.findFirst({
-    where: { telegramChatId: chatId, userId },
+    where: { userId },
     orderBy: { createdAt: "desc" },
     select: { id: true, amount: true, type: true, categoryId: true, date: true, category: { select: { name: true } } },
   });

@@ -278,27 +278,27 @@ async function handleCommand(
 
   switch (cmd) {
     case "/hari":
-      await sendMessage(chatId, await generateDailyReport(chatIdStr));
+      await sendMessage(chatId, await generateDailyReport(userId));
       break;
     case "/minggu":
-      await sendMessage(chatId, await generateWeeklyReport(chatIdStr));
+      await sendMessage(chatId, await generateWeeklyReport(userId));
       break;
     case "/bulan": {
       const monthRaw = args[0] ? parseInt(args[0]) : NaN;
       const yearRaw = args[1] ? parseInt(args[1]) : NaN;
       const month = !isNaN(monthRaw) ? monthRaw : undefined;
       const year = !isNaN(yearRaw) ? yearRaw : undefined;
-      await sendMessage(chatId, await generateMonthlyReport(chatIdStr, month, year));
+      await sendMessage(chatId, await generateMonthlyReport(userId, month, year));
       break;
     }
     case "/riwayat": {
       const limitRaw = args[0] ? parseInt(args[0]) : NaN;
       const limit = !isNaN(limitRaw) && limitRaw > 0 ? limitRaw : 5;
-      await sendMessage(chatId, await getRecentTransactions(chatIdStr, limit));
+      await sendMessage(chatId, await getRecentTransactions(userId, limit));
       break;
     }
     case "/hapus":
-      await sendMessage(chatId, await deleteLastTransaction(chatIdStr, userId));
+      await sendMessage(chatId, await deleteLastTransaction(userId));
       break;
     case "/status": {
       const link = await prisma.telegramLink.findFirst({
