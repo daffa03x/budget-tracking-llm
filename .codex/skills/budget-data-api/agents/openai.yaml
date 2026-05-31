@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Data API"
+  short_description: "Build backend services and APIs"
+  default_prompt: "Use $budget-data-api to implement the data, validation, service, and API route layer for this budget tracker feature."
+
+policy:
+  allow_implicit_invocation: true

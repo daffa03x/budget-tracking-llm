@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Phase Planner"
+  short_description: "Scope budget tracker work by phase"
+  default_prompt: "Use $budget-phase-planner to map this request to the right budget tracker phase and produce a focused implementation checklist."
+
+policy:
+  allow_implicit_invocation: true

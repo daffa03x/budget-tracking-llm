@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Quality Deploy"
+  short_description: "Test, polish, and prepare release"
+  default_prompt: "Use $budget-quality-deploy to review quality, run checks, add focused tests, or prepare the budget tracker for deployment."
+
+policy:
+  allow_implicit_invocation: true

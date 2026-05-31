@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Budgets Module"
+  short_description: "Build budget tracking"
+  default_prompt: "Use $budget-budgets-module to implement budget CRUD, progress calculations, and threshold alerts."
+
+policy:
+  allow_implicit_invocation: true

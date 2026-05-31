@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Auth User"
+  short_description: "Implement auth and profile flows"
+  default_prompt: "Use $budget-auth-user to implement the secure register, login, session, profile, or password flow."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Reports Export"
+  short_description: "Build analytics and CSV export"
+  default_prompt: "Use $budget-reports-export to implement report filters, charts, summary tables, and CSV export."
+
+policy:
+  allow_implicit_invocation: true

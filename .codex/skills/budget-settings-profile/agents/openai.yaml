@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Settings Profile"
+  short_description: "Build profile and settings"
+  default_prompt: "Use $budget-settings-profile to implement account settings, preferences, password changes, or destructive account flows."
+
+policy:
+  allow_implicit_invocation: true

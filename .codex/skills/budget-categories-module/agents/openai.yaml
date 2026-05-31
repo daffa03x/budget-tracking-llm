@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Categories Module"
+  short_description: "Build category CRUD"
+  default_prompt: "Use $budget-categories-module to implement or review category CRUD for the budget tracker."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Frontend UI"
+  short_description: "Build app UI workflows"
+  default_prompt: "Use $budget-frontend-ui to build the budget tracker screen, form, hook, or chart with complete responsive states."
+
+policy:
+  allow_implicit_invocation: true

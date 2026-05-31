@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Dashboard Module"
+  short_description: "Build dashboard summaries and charts"
+  default_prompt: "Use $budget-dashboard-module to implement dashboard summary APIs, chart data, and responsive visualization components."
+
+policy:
+  allow_implicit_invocation: true

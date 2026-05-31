@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Transactions Module"
+  short_description: "Build transaction workflows"
+  default_prompt: "Use $budget-transactions-module to implement income and expense CRUD with filters, pagination, and UI states."
+
+policy:
+  allow_implicit_invocation: true

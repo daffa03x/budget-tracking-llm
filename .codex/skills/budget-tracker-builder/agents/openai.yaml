@@ -1,0 +1,7 @@
+interface:
+  display_name: "Budget Tracker Builder"
+  short_description: "Build this Next.js budget tracker"
+  default_prompt: "Use $budget-tracker-builder to implement the next budget tracker feature from the project docs."
+
+policy:
+  allow_implicit_invocation: true
