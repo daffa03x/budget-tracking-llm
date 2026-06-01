@@ -10,6 +10,7 @@ import {
   generateMonthlyReport,
   getRecentTransactions,
   deleteLastTransaction,
+  getPocketBalances,
 } from "./report";
 import { createTransactionFromBot, getLinkedUserId } from "@/lib/services/telegram.service";
 import { prisma } from "@/lib/prisma";
@@ -34,7 +35,8 @@ const HELP =
   `• Nominal: 50rb · 5jt · 25k · 500.000\n\n` +
   `<b>Laporan:</b>\n` +
   `/hari · /minggu · /bulan\n` +
-  `/bulan 3 · /bulan 3 2025\n\n` +
+  `/bulan 3 · /bulan 3 2025\n` +
+  `/saldo · /saldo [nama]\n\n` +
   `<b>Lainnya:</b>\n` +
   `/riwayat [n] · /hapus · /status`;
 
@@ -311,6 +313,11 @@ async function handleCommand(
         const since = link.createdAt.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" });
         await sendMessage(chatId, `✅ <b>Status: Terhubung</b>\n👤 ${link.firstName ?? ""} (@${link.username ?? "-"})\n📅 Sejak: ${since}`);
       }
+      break;
+    }
+    case "/saldo": {
+      const filter = args.join(" ").trim() || undefined;
+      await sendMessage(chatId, await getPocketBalances(userId, filter));
       break;
     }
     default:
