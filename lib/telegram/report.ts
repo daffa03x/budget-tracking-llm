@@ -166,3 +166,55 @@ export async function deleteLastTransaction(userId: string): Promise<string> {
   const typeStr = last.type === "income" ? "Pemasukan" : "Pengeluaran";
   return `✅ Dihapus: ${typeStr} ${last.category?.name ?? "Lainnya"} ${formatRupiah(Number(last.amount))}`;
 }
+
+export async function getPocketBalances(userId: string, filter?: string): Promise<string> {
+  const pockets = await prisma.pocket.findMany({
+    where: { userId },
+    select: {
+      name: true,
+      initialBalance: true,
+      transactions: {
+        select: { type: true, amount: true },
+      },
+    },
+    orderBy: { name: "asc" },
+  });
+
+  if (pockets.length === 0) {
+    return "Belum ada pocket. Buat pocket di website terlebih dahulu.";
+  }
+
+  const computed = pockets.map((p) => {
+    let balance = Number(p.initialBalance);
+    for (const t of p.transactions) {
+      if (t.type === "income") balance += Number(t.amount);
+      else balance -= Number(t.amount);
+    }
+    return { name: p.name, balance };
+  });
+
+  const renderList = (items: { name: string; balance: number }[]): string => {
+    const lines = ["💼 <b>Saldo Pocket</b>", ""];
+    for (const p of items) {
+      lines.push(`• ${p.name}: <b>${formatRupiah(p.balance)}</b>`);
+    }
+    return lines.join("\n");
+  };
+
+  if (!filter) {
+    return renderList(computed);
+  }
+
+  const filterLower = filter.toLowerCase();
+  const matched = computed.filter((p) => p.name.toLowerCase().includes(filterLower));
+
+  if (matched.length === 0) {
+    return `⚠️ Pocket "${filter}" tidak ditemukan.\n\n${renderList(computed)}`;
+  }
+
+  if (matched.length === 1) {
+    return `💼 <b>${matched[0].name}</b>\nSaldo: <b>${formatRupiah(matched[0].balance)}</b>`;
+  }
+
+  return renderList(matched);
+}
