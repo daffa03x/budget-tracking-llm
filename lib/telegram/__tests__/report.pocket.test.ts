@@ -14,9 +14,9 @@ import { getPocketBalances } from "../report";
 
 const mockFindMany = vi.mocked(prisma.pocket.findMany);
 
-beforeEach(() => vi.clearAllMocks());
-
 describe("getPocketBalances", () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it("returns guidance message when user has no pockets", async () => {
     mockFindMany.mockResolvedValueOnce([]);
     const result = await getPocketBalances("user-1");
@@ -31,8 +31,8 @@ describe("getPocketBalances", () => {
     const result = await getPocketBalances("user-1");
     expect(result).toContain("BCA");
     expect(result).toContain("Gopay");
-    expect(result).toContain("Rp 1.000.000");
-    expect(result).toContain("Rp 200.000");
+    expect(result).toContain("Rp1.000.000");
+    expect(result).toContain("Rp200.000");
   });
 
   it("calculates balance as initialBalance + income - expense", async () => {
@@ -48,7 +48,7 @@ describe("getPocketBalances", () => {
     ] as never);
     const result = await getPocketBalances("user-1");
     // 1000000 + 500000 - 200000 = 1300000
-    expect(result).toContain("Rp 1.300.000");
+    expect(result).toContain("Rp1.300.000");
   });
 
   it("returns single pocket when filter matches exactly one", async () => {
@@ -59,6 +59,7 @@ describe("getPocketBalances", () => {
     const result = await getPocketBalances("user-1", "BCA");
     expect(result).toContain("BCA");
     expect(result).not.toContain("Gopay");
+    expect(result).toContain("Saldo:");
   });
 
   it("filter is case-insensitive", async () => {
