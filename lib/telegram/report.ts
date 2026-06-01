@@ -174,6 +174,7 @@ export async function getPocketBalances(userId: string, filter?: string): Promis
       name: true,
       initialBalance: true,
       transactions: {
+        where: { userId },
         select: { type: true, amount: true },
       },
     },
@@ -201,7 +202,7 @@ export async function getPocketBalances(userId: string, filter?: string): Promis
     return lines.join("\n");
   };
 
-  if (!filter) {
+  if (filter === undefined) {
     return renderList(computed);
   }
 
