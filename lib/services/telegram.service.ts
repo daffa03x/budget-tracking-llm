@@ -1,6 +1,7 @@
 // lib/services/telegram.service.ts
 import { prisma } from "@/lib/prisma";
 import { syncBudgetsForExpenseChange } from "@/lib/services/budget.service";
+import type { Prisma, TelegramInteraction } from "@/lib/generated/prisma/client";
 
 type BotTransactionInput = {
   type: "income" | "expense";
@@ -174,4 +175,130 @@ export async function listPocketsForUser(
     orderBy: { name: "asc" },
     take: 20,
   });
+}
+
+const INTERACTION_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+export type DraftItem = {
+  type: "income" | "expense";
+  amount: number;
+  category: string;
+  pocketName: string | null;
+};
+
+export async function createInteraction(input: {
+  chatId: string;
+  messageId: number;
+  userId: string;
+  kind: "draft" | "saved";
+  source: "text" | "voice" | "image";
+  transactionId?: string | null;
+  payload?: DraftItem[] | null;
+}): Promise<void> {
+  await prisma.telegramInteraction.create({
+    data: {
+      chatId: input.chatId,
+      messageId: input.messageId,
+      userId: input.userId,
+      kind: input.kind,
+      source: input.source,
+      transactionId: input.transactionId ?? null,
+      payload: (input.payload ?? null) as Prisma.InputJsonValue | undefined,
+      expiresAt: new Date(Date.now() + INTERACTION_TTL_MS),
+    },
+  });
+}
+
+// Updates a draft's stored payload after an inline edit (single-item drafts).
+export async function updateInteractionPayload(
+  chatId: string,
+  messageId: number,
+  payload: DraftItem[],
+): Promise<void> {
+  await prisma.telegramInteraction.update({
+    where: { chatId_messageId: { chatId, messageId } },
+    data: { payload: payload as unknown as Prisma.InputJsonValue },
+  });
+}
+
+// Resolves a category/pocket id back to its display name so draft payloads
+// (which store names, not ids) stay correct after an inline pick.
+export async function getCategoryName(userId: string, categoryId: string): Promise<string | null> {
+  const cat = await prisma.category.findFirst({
+    where: { id: categoryId, OR: [{ userId }, { userId: null, isDefault: true }] },
+    select: { name: true },
+  });
+  return cat?.name ?? null;
+}
+
+export async function getPocketName(userId: string, pocketId: string): Promise<string | null> {
+  const pocket = await prisma.pocket.findFirst({
+    where: { id: pocketId, userId },
+    select: { name: true },
+  });
+  return pocket?.name ?? null;
+}
+
+export async function getInteraction(
+  chatId: string,
+  messageId: number,
+): Promise<TelegramInteraction | null> {
+  const row = await prisma.telegramInteraction.findUnique({
+    where: { chatId_messageId: { chatId, messageId } },
+  });
+  if (!row) return null;
+  if (row.expiresAt.getTime() < Date.now()) return null;
+  return row;
+}
+
+export async function setInteractionTransaction(
+  chatId: string,
+  messageId: number,
+  transactionId: string,
+): Promise<void> {
+  // Keep payload so the category picker can still read the transaction type.
+  await prisma.telegramInteraction.update({
+    where: { chatId_messageId: { chatId, messageId } },
+    data: { kind: "saved", transactionId },
+  });
+}
+
+export async function setInteractionPendingAmount(
+  chatId: string,
+  messageId: number,
+  promptMessageId: number,
+): Promise<void> {
+  await prisma.telegramInteraction.update({
+    where: { chatId_messageId: { chatId, messageId } },
+    data: { pendingField: "amount", promptMessageId },
+  });
+}
+
+export async function clearInteractionPending(
+  chatId: string,
+  messageId: number,
+): Promise<void> {
+  await prisma.telegramInteraction.update({
+    where: { chatId_messageId: { chatId, messageId } },
+    data: { pendingField: "none", promptMessageId: null },
+  });
+}
+
+export async function deleteInteraction(chatId: string, messageId: number): Promise<void> {
+  await prisma.telegramInteraction
+    .delete({ where: { chatId_messageId: { chatId, messageId } } })
+    .catch(() => {});
+}
+
+// Finds the interaction whose force_reply prompt the user replied to.
+export async function findInteractionByPrompt(
+  chatId: string,
+  promptMessageId: number,
+): Promise<TelegramInteraction | null> {
+  const row = await prisma.telegramInteraction.findFirst({
+    where: { chatId, promptMessageId, pendingField: "amount" },
+  });
+  if (!row) return null;
+  if (row.expiresAt.getTime() < Date.now()) return null;
+  return row;
 }

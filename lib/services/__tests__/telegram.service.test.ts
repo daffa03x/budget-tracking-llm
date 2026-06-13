@@ -10,6 +10,13 @@ vi.mock("@/lib/prisma", () => ({
     },
     category: { findMany: vi.fn() },
     pocket: { findMany: vi.fn() },
+    telegramInteraction: {
+      create: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      findFirst: vi.fn(),
+    },
   },
 }));
 
@@ -23,6 +30,9 @@ import {
   updateTransactionAmount,
   deleteTransactionById,
   listCategoriesForUser,
+  createInteraction,
+  getInteraction,
+  findInteractionByPrompt,
 } from "../telegram.service";
 
 describe("updateTransactionAmount", () => {
@@ -84,5 +94,69 @@ describe("listCategoriesForUser", () => {
     ] as never);
     const cats = await listCategoriesForUser("user-1", "expense");
     expect(cats).toEqual([{ id: "c1", name: "Makan" }]);
+  });
+});
+
+describe("createInteraction", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("persists a draft interaction with payload + expiry", async () => {
+    vi.mocked(prisma.telegramInteraction.create).mockResolvedValueOnce({ id: "i1" } as never);
+    await createInteraction({
+      chatId: "123",
+      messageId: 55,
+      userId: "user-1",
+      kind: "draft",
+      source: "image",
+      payload: [{ type: "expense", amount: 50000, category: "Makan", pocketName: null }],
+    });
+    const arg = vi.mocked(prisma.telegramInteraction.create).mock.calls[0][0] as {
+      data: { chatId: string; messageId: number; kind: string; expiresAt: Date };
+    };
+    expect(arg.data.chatId).toBe("123");
+    expect(arg.data.messageId).toBe(55);
+    expect(arg.data.kind).toBe("draft");
+    expect(arg.data.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+describe("getInteraction", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns null for an expired interaction", async () => {
+    vi.mocked(prisma.telegramInteraction.findUnique).mockResolvedValueOnce({
+      id: "i1",
+      expiresAt: new Date(Date.now() - 1000),
+    } as never);
+    expect(await getInteraction("123", 55)).toBeNull();
+  });
+
+  it("returns a live interaction", async () => {
+    const live = { id: "i1", expiresAt: new Date(Date.now() + 60000), kind: "draft" };
+    vi.mocked(prisma.telegramInteraction.findUnique).mockResolvedValueOnce(live as never);
+    expect(await getInteraction("123", 55)).toEqual(live);
+  });
+});
+
+describe("findInteractionByPrompt", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns null when no matching prompt exists", async () => {
+    vi.mocked(prisma.telegramInteraction.findFirst).mockResolvedValueOnce(null);
+    expect(await findInteractionByPrompt("123", 99)).toBeNull();
+  });
+
+  it("returns null for an expired interaction", async () => {
+    vi.mocked(prisma.telegramInteraction.findFirst).mockResolvedValueOnce({
+      id: "i1",
+      expiresAt: new Date(Date.now() - 1000),
+    } as never);
+    expect(await findInteractionByPrompt("123", 99)).toBeNull();
+  });
+
+  it("returns a live interaction matching the prompt", async () => {
+    const live = { id: "i1", expiresAt: new Date(Date.now() + 60000), pendingField: "amount" };
+    vi.mocked(prisma.telegramInteraction.findFirst).mockResolvedValueOnce(live as never);
+    expect(await findInteractionByPrompt("123", 99)).toEqual(live);
   });
 });
