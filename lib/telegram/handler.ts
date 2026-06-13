@@ -4,7 +4,7 @@ import { parseMessage, formatRupiah } from "./parser";
 import { transcribeAudio } from "./stt";
 import { extractTransactionFromText, extractTransactionFromImage } from "./llm";
 import { resolveCategory, resolvePocket } from "./resolver";
-import { savedConfirmKeyboard } from "./keyboards";
+import { savedConfirmKeyboard, draftConfirmKeyboard, draftSaveOnlyKeyboard } from "./keyboards";
 import {
   generateDailyReport,
   generateWeeklyReport,
@@ -13,7 +13,7 @@ import {
   deleteLastTransaction,
   getPocketBalances,
 } from "./report";
-import { createTransactionFromBot, getLinkedUserId, createInteraction } from "@/lib/services/telegram.service";
+import { createTransactionFromBot, getLinkedUserId, createInteraction, type DraftItem } from "@/lib/services/telegram.service";
 import { prisma } from "@/lib/prisma";
 import type { ParsedTransaction, TelegramFrom, TelegramUpdate } from "./types";
 
@@ -120,7 +120,9 @@ async function handleText(chatId: number, chatIdStr: string, text: string): Prom
   try {
     const llmResult = await extractTransactionFromText(text);
     if (llmResult) {
-      await saveAndConfirm(chatId, chatIdStr, userId, llmResult, "text", text);
+      await previewDraft(chatId, chatIdStr, userId, [
+        { type: llmResult.type, amount: llmResult.amount, category: llmResult.category, pocketName: llmResult.pocketName },
+      ], "🤖 <b>Saya tangkap transaksi ini:</b>", "text");
       return;
     }
   } catch {
@@ -180,7 +182,9 @@ async function handleVoice(
   }
 
   if (llmResult) {
-    await saveAndConfirm(chatId, chatIdStr, userId, llmResult, "voice", transcript);
+    await previewDraft(chatId, chatIdStr, userId, [
+      { type: llmResult.type, amount: llmResult.amount, category: llmResult.category, pocketName: llmResult.pocketName },
+    ], "🎙️ <b>Saya tangkap transaksi ini:</b>", "voice");
     return;
   }
 
@@ -220,39 +224,50 @@ async function handleImage(
     return;
   }
 
-  const lines = ["📷 <b>Struk terbaca!</b>", ""];
+  const items: DraftItem[] = results.map((r) => ({
+    type: "expense",
+    amount: r.amount,
+    category: r.category,
+    pocketName: null,
+  }));
+  await previewDraft(chatId, chatIdStr, userId, items, "📷 <b>Struk terbaca!</b>", "image");
+}
+
+async function previewDraft(
+  chatId: number,
+  chatIdStr: string,
+  userId: string,
+  items: DraftItem[],
+  headline: string,
+  source: "text" | "voice" | "image",
+): Promise<void> {
+  const lines = [headline, ""];
   let total = 0;
-  let savedCount = 0;
-
-  for (const r of results) {
-    try {
-      const categoryId = await resolveCategory(userId, r.category, r.type);
-      await createTransactionFromBot({
-        type: r.type,
-        amount: r.amount,
-        categoryId,
-        pocketId: null,
-        source: "image",
-        rawInput: caption ?? null,
-        telegramChatId: chatIdStr,
-        userId,
-      });
-      lines.push(`💸 ${r.category} — ${formatRupiah(r.amount)}`);
-      total += r.amount;
-      savedCount++;
-    } catch (err) {
-      console.error("[Bot] handlePhoto item failed:", err);
-      lines.push(`⚠️ ${r.category} — gagal disimpan`);
-    }
+  for (const it of items) {
+    const icon = it.type === "income" ? "💰" : "💸";
+    lines.push(`${icon} ${it.category} — ${formatRupiah(it.amount)}`);
+    total += it.amount;
   }
-
-  if (savedCount === 0) {
-    await sendMessage(chatId, "Gagal menyimpan transaksi dari struk. Coba kirim ulang.");
-    return;
+  if (items.length > 1) {
+    lines.push("", `Total: ${formatRupiah(total)} (${items.length} transaksi)`);
   }
+  lines.push("", "Simpan transaksi ini?");
 
-  lines.push("", `Total: ${formatRupiah(total)} (${savedCount} dari ${results.length} transaksi dicatat)`);
-  await sendMessage(chatId, lines.join("\n"));
+  // Single-item drafts get the full edit toolkit; multi-item drafts (multi-
+  // receipt photos) only get save/cancel (per-item editing is out of scope).
+  const keyboard = items.length === 1 ? draftConfirmKeyboard() : draftSaveOnlyKeyboard();
+
+  const messageId = await sendMessage(chatId, lines.join("\n"), { reply_markup: keyboard });
+  if (messageId !== null) {
+    await createInteraction({
+      chatId: chatIdStr,
+      messageId,
+      userId,
+      kind: "draft",
+      source,
+      payload: items,
+    });
+  }
 }
 
 async function saveAndConfirm(
