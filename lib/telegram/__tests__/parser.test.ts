@@ -38,6 +38,24 @@ describe("parseMessage — expense keywords", () => {
       pocketName: null,
     });
   });
+
+  it("ignores trailing period from STT transcript (word amount)", () => {
+    expect(parseMessage("Pengeluaran makan lima puluh ribu.")).toEqual({
+      type: "expense",
+      amount: 50000,
+      category: "Makan",
+      pocketName: null,
+    });
+  });
+
+  it("ignores trailing period from STT transcript (digit amount)", () => {
+    expect(parseMessage("pengeluaran kopi 25rb.")).toEqual({
+      type: "expense",
+      amount: 25000,
+      category: "Kopi",
+      pocketName: null,
+    });
+  });
 });
 
 describe("parseMessage — income keywords", () => {

@@ -128,7 +128,10 @@ function parseAmount(numStr: string, suffix: string): number | null {
 }
 
 export function parseMessage(text: string): ParsedTransaction | null {
-  const trimmed = text.trim();
+  // Strip trailing sentence punctuation — STT transcripts often end with "."
+  // (e.g. "pengeluaran makan lima puluh ribu."), which would otherwise break
+  // the trailing word-number / amount match.
+  const trimmed = text.trim().replace(/[.!?;:]+$/, "").trim();
   let type: "income" | "expense";
   let body: string;
 

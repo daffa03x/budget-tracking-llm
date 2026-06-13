@@ -1,7 +1,11 @@
 // lib/telegram/llm.ts
 import type { ParsedTransaction } from "./types";
 
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+// gemini-2.0-flash has no free-tier quota on some projects (returns 429
+// limit: 0); 2.5-flash works and is stronger at receipt OCR. Override with
+// GEMINI_MODEL if needed.
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
 // Strips ```json ... ``` / ``` ... ``` fences that some model responses wrap
 // JSON in, even when responseMimeType is requested.
