@@ -8,12 +8,13 @@ vi.mock("@/lib/prisma", () => ({
       update: vi.fn(),
       delete: vi.fn(),
     },
-    category: { findMany: vi.fn() },
-    pocket: { findMany: vi.fn() },
+    category: { findMany: vi.fn(), findFirst: vi.fn() },
+    pocket: { findMany: vi.fn(), findFirst: vi.fn() },
     telegramInteraction: {
       create: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn(),
       findFirst: vi.fn(),
     },
@@ -28,11 +29,13 @@ import { prisma } from "@/lib/prisma";
 import { syncBudgetsForExpenseChange } from "@/lib/services/budget.service";
 import {
   updateTransactionAmount,
+  updateTransactionCategory,
   deleteTransactionById,
   listCategoriesForUser,
   createInteraction,
   getInteraction,
   findInteractionByPrompt,
+  claimDraft,
 } from "../telegram.service";
 
 describe("updateTransactionAmount", () => {
@@ -158,5 +161,33 @@ describe("findInteractionByPrompt", () => {
     const live = { id: "i1", expiresAt: new Date(Date.now() + 60000), pendingField: "amount" };
     vi.mocked(prisma.telegramInteraction.findFirst).mockResolvedValueOnce(live as never);
     expect(await findInteractionByPrompt("123", 99)).toEqual(live);
+  });
+});
+
+describe("updateTransactionCategory ownership of target category", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns false when target category is not owned / not default", async () => {
+    vi.mocked(prisma.transaction.findFirst).mockResolvedValueOnce({
+      id: "txn-1", type: "expense", categoryId: "old", date: new Date("2026-06-13"),
+    } as never);
+    vi.mocked(prisma.category.findFirst).mockResolvedValueOnce(null);
+    const ok = await updateTransactionCategory("user-1", "txn-1", "foreign-cat");
+    expect(ok).toBe(false);
+    expect(prisma.transaction.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("claimDraft", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns true when exactly one draft row is claimed", async () => {
+    vi.mocked(prisma.telegramInteraction.updateMany).mockResolvedValueOnce({ count: 1 } as never);
+    expect(await claimDraft("123", 55)).toBe(true);
+  });
+
+  it("returns false when no draft row is claimed (already processed)", async () => {
+    vi.mocked(prisma.telegramInteraction.updateMany).mockResolvedValueOnce({ count: 0 } as never);
+    expect(await claimDraft("123", 55)).toBe(false);
   });
 });

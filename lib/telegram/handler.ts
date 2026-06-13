@@ -272,8 +272,8 @@ async function handleAmountReply(
   await clearInteractionPending(chatIdStr, interaction.messageId);
 
   if (interaction.kind === "saved" && interaction.transactionId) {
-    await updateTransactionAmount(interaction.userId, interaction.transactionId, amount);
-    await sendMessage(chatId, `✅ Nominal diperbarui: ${formatRupiah(amount)}`);
+    const ok = await updateTransactionAmount(interaction.userId, interaction.transactionId, amount);
+    await sendMessage(chatId, ok ? `✅ Nominal diperbarui: ${formatRupiah(amount)}` : "⚠️ Transaksi ini sudah tidak ada.");
   } else {
     const items = (interaction.payload as DraftItem[] | null) ?? [];
     if (items.length === 1) {

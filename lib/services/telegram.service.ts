@@ -69,6 +69,16 @@ export async function claimTelegramUpdate(updateId: number): Promise<boolean> {
   }
 }
 
+// Atomically claims a draft for saving so concurrent/retried "save" taps can't
+// create duplicate transactions. Returns true only for the tap that wins.
+export async function claimDraft(chatId: string, messageId: number): Promise<boolean> {
+  const res = await prisma.telegramInteraction.updateMany({
+    where: { chatId, messageId, kind: "draft" },
+    data: { kind: "saved" },
+  });
+  return res.count === 1;
+}
+
 export async function getLinkedUserId(chatId: string): Promise<string | null> {
   const link = await prisma.telegramLink.findFirst({
     where: { chatId, linked: true },
@@ -106,6 +116,11 @@ export async function updateTransactionCategory(
 ): Promise<boolean> {
   const txn = await findOwnedTransaction(userId, transactionId);
   if (!txn) return false;
+  const ownsCategory = await prisma.category.findFirst({
+    where: { id: categoryId, OR: [{ userId }, { userId: null, isDefault: true }] },
+    select: { id: true },
+  });
+  if (!ownsCategory) return false;
   await prisma.transaction.update({ where: { id: transactionId }, data: { categoryId } });
   await resyncExpense(userId, txn); // old category
   await resyncExpense(userId, { ...txn, categoryId }); // new category
@@ -119,6 +134,11 @@ export async function updateTransactionPocket(
 ): Promise<boolean> {
   const txn = await findOwnedTransaction(userId, transactionId);
   if (!txn) return false;
+  const ownsPocket = await prisma.pocket.findFirst({
+    where: { id: pocketId, userId },
+    select: { id: true },
+  });
+  if (!ownsPocket) return false;
   await prisma.transaction.update({ where: { id: transactionId }, data: { pocketId } });
   return true;
 }

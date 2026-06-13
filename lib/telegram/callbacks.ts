@@ -22,6 +22,7 @@ import {
   updateTransactionCategory,
   updateTransactionPocket,
   deleteTransactionById,
+  claimDraft,
   type DraftItem,
 } from "@/lib/services/telegram.service";
 import type { TelegramCallbackQuery } from "./types";
@@ -87,110 +88,137 @@ export async function handleCallbackQuery(cb: TelegramCallbackQuery): Promise<vo
   const chatIdStr = String(chatId);
   const messageId = message.message_id;
 
-  const decoded = decodeCallback(cb.data);
-  const interaction = await getInteraction(chatIdStr, messageId);
+  try {
+    const decoded = decodeCallback(cb.data);
+    const interaction = await getInteraction(chatIdStr, messageId);
 
-  if (!decoded || !interaction) {
-    await answerCallbackQuery(cb.id, "Sesi sudah berakhir. Kirim ulang transaksinya.");
-    await editMessageText(chatId, messageId, message.text ?? "Sesi berakhir.", {});
-    return;
-  }
+    if (!decoded || !interaction) {
+      await answerCallbackQuery(cb.id, "Sesi sudah berakhir. Kirim ulang transaksinya.");
+      await editMessageText(chatId, messageId, message.text ?? "Sesi berakhir.", {});
+      return;
+    }
 
-  const userId = interaction.userId;
-  const items = (interaction.payload as DraftItem[] | null) ?? [];
+    const userId = interaction.userId;
+    const items = (interaction.payload as DraftItem[] | null) ?? [];
 
-  switch (decoded.kind) {
-    case "save": {
-      if (interaction.kind !== "draft") { await answerCallbackQuery(cb.id, "Sudah tersimpan."); return; }
-      for (const it of items) {
-        const categoryId = await resolveCategory(userId, it.category, it.type);
-        const pocketId = it.pocketName ? await resolvePocket(userId, it.pocketName) : null;
-        const created = await createTransactionFromBot({
-          type: it.type, amount: it.amount, categoryId, pocketId,
-          source: interaction.source as "text" | "voice" | "image",
-          rawInput: null, telegramChatId: chatIdStr, userId,
+    switch (decoded.kind) {
+      case "save": {
+        if (interaction.kind !== "draft") { await answerCallbackQuery(cb.id, "Sudah tersimpan."); return; }
+        const claimed = await claimDraft(chatIdStr, messageId);
+        if (!claimed) { await answerCallbackQuery(cb.id, "Sudah diproses."); return; }
+        for (const it of items) {
+          const categoryId = await resolveCategory(userId, it.category, it.type);
+          const pocketId = it.pocketName ? await resolvePocket(userId, it.pocketName) : null;
+          const created = await createTransactionFromBot({
+            type: it.type, amount: it.amount, categoryId, pocketId,
+            source: interaction.source as "text" | "voice" | "image",
+            rawInput: null, telegramChatId: chatIdStr, userId,
+          });
+          if (items.length === 1) await setInteractionTransaction(chatIdStr, messageId, created.id);
+        }
+        if (items.length > 1) await deleteInteraction(chatIdStr, messageId);
+        await editMessageText(chatId, messageId, renderSaved(items), {
+          reply_markup: items.length === 1 ? savedConfirmKeyboard() : undefined,
         });
-        if (items.length === 1) await setInteractionTransaction(chatIdStr, messageId, created.id);
+        await answerCallbackQuery(cb.id, "Tersimpan ✅");
+        return;
       }
-      if (items.length > 1) await deleteInteraction(chatIdStr, messageId);
-      await editMessageText(chatId, messageId, renderSaved(items), {
-        reply_markup: items.length === 1 ? savedConfirmKeyboard() : undefined,
-      });
-      await answerCallbackQuery(cb.id, "Tersimpan ✅");
-      return;
-    }
 
-    case "cancel": {
-      if (interaction.kind === "saved" && interaction.transactionId) {
-        await deleteTransactionById(userId, interaction.transactionId);
+      case "cancel": {
+        if (interaction.kind === "saved" && interaction.transactionId) {
+          await deleteTransactionById(userId, interaction.transactionId);
+        }
+        await deleteInteraction(chatIdStr, messageId);
+        await editMessageText(chatId, messageId, "❌ Dibatalkan.", {});
+        await answerCallbackQuery(cb.id, "Dibatalkan");
+        return;
       }
-      await deleteInteraction(chatIdStr, messageId);
-      await editMessageText(chatId, messageId, "❌ Dibatalkan.", {});
-      await answerCallbackQuery(cb.id, "Dibatalkan");
-      return;
-    }
 
-    case "catMenu": {
-      const type = items[0]?.type ?? "expense";
-      const cats = await listCategoriesForUser(userId, type);
-      await editMessageText(chatId, messageId, message.text ?? "Pilih kategori:", {
-        reply_markup: categoryPickerKeyboard(cats),
-      });
-      await answerCallbackQuery(cb.id);
-      return;
-    }
-
-    case "catPick": {
-      if (interaction.kind === "saved" && interaction.transactionId) {
-        await updateTransactionCategory(userId, interaction.transactionId, decoded.id);
-      } else if (interaction.kind === "draft" && items.length === 1) {
-        const name = await getCategoryName(userId, decoded.id);
-        if (name) await updateInteractionPayload(chatIdStr, messageId, [{ ...items[0], category: name }]);
+      case "catMenu": {
+        const type = items[0]?.type ?? "expense";
+        const cats = await listCategoriesForUser(userId, type);
+        await editMessageText(chatId, messageId, message.text ?? "Pilih kategori:", {
+          reply_markup: categoryPickerKeyboard(cats),
+        });
+        await answerCallbackQuery(cb.id);
+        return;
       }
-      await editMessageText(chatId, messageId, message.text ?? "Kategori diubah.", {
-        reply_markup: interaction.kind === "saved" ? savedConfirmKeyboard() : draftConfirmKeyboard(),
-      });
-      await answerCallbackQuery(cb.id, "Kategori diubah");
-      return;
-    }
 
-    case "pktMenu": {
-      const pockets = await listPocketsForUser(userId);
-      if (pockets.length === 0) { await answerCallbackQuery(cb.id, "Belum ada kantong."); return; }
-      await editMessageText(chatId, messageId, message.text ?? "Pilih kantong:", {
-        reply_markup: pocketPickerKeyboard(pockets),
-      });
-      await answerCallbackQuery(cb.id);
-      return;
-    }
-
-    case "pktPick": {
-      if (interaction.kind === "saved" && interaction.transactionId) {
-        await updateTransactionPocket(userId, interaction.transactionId, decoded.id);
-      } else if (interaction.kind === "draft" && items.length === 1) {
-        const name = await getPocketName(userId, decoded.id);
-        if (name) await updateInteractionPayload(chatIdStr, messageId, [{ ...items[0], pocketName: name }]);
+      case "catPick": {
+        if (interaction.kind === "draft" && items.length !== 1) {
+          await answerCallbackQuery(cb.id, "Tidak bisa mengubah item ganda.");
+          return;
+        }
+        if (interaction.kind === "saved" && interaction.transactionId) {
+          const ok = await updateTransactionCategory(userId, interaction.transactionId, decoded.id);
+          if (!ok) {
+            await editMessageText(chatId, messageId, "⚠️ Transaksi ini sudah tidak ada.", {});
+            await deleteInteraction(chatIdStr, messageId);
+            await answerCallbackQuery(cb.id, "Sudah tidak ada");
+            return;
+          }
+        } else if (interaction.kind === "draft" && items.length === 1) {
+          const name = await getCategoryName(userId, decoded.id);
+          if (name) await updateInteractionPayload(chatIdStr, messageId, [{ ...items[0], category: name }]);
+        }
+        await editMessageText(chatId, messageId, message.text ?? "Kategori diubah.", {
+          reply_markup: interaction.kind === "saved" ? savedConfirmKeyboard() : draftConfirmKeyboard(),
+        });
+        await answerCallbackQuery(cb.id, "Kategori diubah");
+        return;
       }
-      await editMessageText(chatId, messageId, message.text ?? "Kantong diubah.", {
-        reply_markup: interaction.kind === "saved" ? savedConfirmKeyboard() : draftConfirmKeyboard(),
-      });
-      await answerCallbackQuery(cb.id, "Kantong diubah");
-      return;
-    }
 
-    case "amt": {
-      const promptId = await sendForceReply(chatId, "💵 Ketik nominal baru (mis. 50rb):");
-      if (promptId !== null) await setInteractionPendingAmount(chatIdStr, messageId, promptId);
-      await answerCallbackQuery(cb.id);
-      return;
-    }
+      case "pktMenu": {
+        const pockets = await listPocketsForUser(userId);
+        if (pockets.length === 0) { await answerCallbackQuery(cb.id, "Belum ada kantong."); return; }
+        await editMessageText(chatId, messageId, message.text ?? "Pilih kantong:", {
+          reply_markup: pocketPickerKeyboard(pockets),
+        });
+        await answerCallbackQuery(cb.id);
+        return;
+      }
 
-    case "back": {
-      await editMessageText(chatId, messageId, message.text ?? "", {
-        reply_markup: interaction.kind === "saved" ? savedConfirmKeyboard() : draftConfirmKeyboard(),
-      });
-      await answerCallbackQuery(cb.id);
-      return;
+      case "pktPick": {
+        if (interaction.kind === "draft" && items.length !== 1) {
+          await answerCallbackQuery(cb.id, "Tidak bisa mengubah item ganda.");
+          return;
+        }
+        if (interaction.kind === "saved" && interaction.transactionId) {
+          const ok = await updateTransactionPocket(userId, interaction.transactionId, decoded.id);
+          if (!ok) {
+            await editMessageText(chatId, messageId, "⚠️ Transaksi ini sudah tidak ada.", {});
+            await deleteInteraction(chatIdStr, messageId);
+            await answerCallbackQuery(cb.id, "Sudah tidak ada");
+            return;
+          }
+        } else if (interaction.kind === "draft" && items.length === 1) {
+          const name = await getPocketName(userId, decoded.id);
+          if (name) await updateInteractionPayload(chatIdStr, messageId, [{ ...items[0], pocketName: name }]);
+        }
+        await editMessageText(chatId, messageId, message.text ?? "Kantong diubah.", {
+          reply_markup: interaction.kind === "saved" ? savedConfirmKeyboard() : draftConfirmKeyboard(),
+        });
+        await answerCallbackQuery(cb.id, "Kantong diubah");
+        return;
+      }
+
+      case "amt": {
+        const promptId = await sendForceReply(chatId, "💵 Ketik nominal baru (mis. 50rb):");
+        if (promptId !== null) await setInteractionPendingAmount(chatIdStr, messageId, promptId);
+        await answerCallbackQuery(cb.id);
+        return;
+      }
+
+      case "back": {
+        await editMessageText(chatId, messageId, message.text ?? "", {
+          reply_markup: interaction.kind === "saved" ? savedConfirmKeyboard() : draftConfirmKeyboard(),
+        });
+        await answerCallbackQuery(cb.id);
+        return;
+      }
     }
+  } catch (err) {
+    console.error("[Bot] callback error:", err);
+    await answerCallbackQuery(cb.id, "Terjadi kesalahan, coba lagi.");
   }
 }
