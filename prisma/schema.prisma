@@ -208,6 +208,37 @@ model TelegramProcessedUpdate {
   @@index([createdAt])
 }
 
+enum TelegramInteractionKind {
+  draft
+  saved
+}
+
+enum TelegramPendingField {
+  none
+  amount
+}
+
+// Context for an interactive (button-bearing) bot message, keyed by the
+// message's own message_id. draft = previewed but not yet saved; saved = a
+// real Transaction the buttons can undo/edit.
+model TelegramInteraction {
+  id              String                  @id @default(cuid())
+  chatId          String
+  messageId       Int
+  userId          String
+  kind            TelegramInteractionKind
+  source          TransactionSource       @default(text)
+  transactionId   String?
+  payload         Json?
+  pendingField    TelegramPendingField    @default(none)
+  promptMessageId Int?
+  expiresAt       DateTime
+  createdAt       DateTime                @default(now())
+
+  @@unique([chatId, messageId])
+  @@index([expiresAt])
+}
+
 model TelegramLink {
   id        String   @id @default(cuid())
   token     String   @unique
