@@ -13,7 +13,17 @@ import {
   deleteLastTransaction,
   getPocketBalances,
 } from "./report";
-import { createTransactionFromBot, getLinkedUserId, createInteraction, type DraftItem } from "@/lib/services/telegram.service";
+import {
+  createTransactionFromBot,
+  getLinkedUserId,
+  createInteraction,
+  findInteractionByPrompt,
+  clearInteractionPending,
+  updateTransactionAmount,
+  updateInteractionPayload,
+  type DraftItem,
+} from "@/lib/services/telegram.service";
+import { handleCallbackQuery } from "./callbacks";
 import { prisma } from "@/lib/prisma";
 import type { ParsedTransaction, TelegramFrom, TelegramUpdate } from "./types";
 
@@ -42,6 +52,11 @@ const HELP =
   `/riwayat [n] · /hapus · /status`;
 
 export async function handleUpdate(update: TelegramUpdate): Promise<void> {
+  if (update.callback_query) {
+    await handleCallbackQuery(update.callback_query);
+    return;
+  }
+
   const msg = update.message;
   if (!msg) return;
 
@@ -49,6 +64,11 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
   const chatIdStr = String(chatId);
 
   try {
+    if (msg.text && msg.reply_to_message) {
+      const handled = await handleAmountReply(chatId, chatIdStr, msg.text, msg.reply_to_message.message_id);
+      if (handled) return;
+    }
+
     if (msg.text?.startsWith("/")) {
       await handleCommand(chatId, chatIdStr, msg.text, msg.from);
       return;
@@ -231,6 +251,37 @@ async function handleImage(
     pocketName: null,
   }));
   await previewDraft(chatId, chatIdStr, userId, items, "📷 <b>Struk terbaca!</b>", "image");
+}
+
+async function handleAmountReply(
+  chatId: number,
+  chatIdStr: string,
+  text: string,
+  replyToMessageId: number,
+): Promise<boolean> {
+  const interaction = await findInteractionByPrompt(chatIdStr, replyToMessageId);
+  if (!interaction) return false;
+
+  const parsed = parseMessage(`pengeluaran x ${text}`); // reuse amount parser
+  const amount = parsed?.amount ?? null;
+  if (amount === null) {
+    await sendMessage(chatId, "Nominal tidak dikenali. Ketik angka seperti 50rb atau 50000.");
+    return true;
+  }
+
+  await clearInteractionPending(chatIdStr, interaction.messageId);
+
+  if (interaction.kind === "saved" && interaction.transactionId) {
+    await updateTransactionAmount(interaction.userId, interaction.transactionId, amount);
+    await sendMessage(chatId, `✅ Nominal diperbarui: ${formatRupiah(amount)}`);
+  } else {
+    const items = (interaction.payload as DraftItem[] | null) ?? [];
+    if (items.length === 1) {
+      await updateInteractionPayload(chatIdStr, interaction.messageId, [{ ...items[0], amount }]);
+    }
+    await sendMessage(chatId, `Nominal draft jadi ${formatRupiah(amount)}. Tekan ✅ Simpan di pesan sebelumnya untuk menyimpan.`);
+  }
+  return true;
 }
 
 async function previewDraft(
