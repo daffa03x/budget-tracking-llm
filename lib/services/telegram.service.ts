@@ -75,3 +75,103 @@ export async function getLinkedUserId(chatId: string): Promise<string | null> {
   });
   return link?.userId ?? null;
 }
+
+type OwnedTxn = {
+  id: string;
+  type: "income" | "expense";
+  categoryId: string | null;
+  date: Date;
+};
+
+async function findOwnedTransaction(userId: string, transactionId: string): Promise<OwnedTxn | null> {
+  return prisma.transaction.findFirst({
+    where: { id: transactionId, userId },
+    select: { id: true, type: true, categoryId: true, date: true },
+  });
+}
+
+async function resyncExpense(userId: string, txn: OwnedTxn): Promise<void> {
+  if (txn.type === "expense") {
+    await syncBudgetsForExpenseChange(userId, [
+      { type: txn.type, categoryId: txn.categoryId, date: txn.date },
+    ]);
+  }
+}
+
+export async function updateTransactionCategory(
+  userId: string,
+  transactionId: string,
+  categoryId: string,
+): Promise<boolean> {
+  const txn = await findOwnedTransaction(userId, transactionId);
+  if (!txn) return false;
+  await prisma.transaction.update({ where: { id: transactionId }, data: { categoryId } });
+  await resyncExpense(userId, txn); // old category
+  await resyncExpense(userId, { ...txn, categoryId }); // new category
+  return true;
+}
+
+export async function updateTransactionPocket(
+  userId: string,
+  transactionId: string,
+  pocketId: string,
+): Promise<boolean> {
+  const txn = await findOwnedTransaction(userId, transactionId);
+  if (!txn) return false;
+  await prisma.transaction.update({ where: { id: transactionId }, data: { pocketId } });
+  return true;
+}
+
+export async function updateTransactionAmount(
+  userId: string,
+  transactionId: string,
+  amount: number,
+): Promise<boolean> {
+  const txn = await findOwnedTransaction(userId, transactionId);
+  if (!txn) return false;
+  await prisma.transaction.update({
+    where: { id: transactionId },
+    data: { amount: amount.toFixed(2) },
+  });
+  await resyncExpense(userId, txn);
+  return true;
+}
+
+export async function deleteTransactionById(
+  userId: string,
+  transactionId: string,
+): Promise<boolean> {
+  const txn = await findOwnedTransaction(userId, transactionId);
+  if (!txn) return false;
+  await prisma.transaction.delete({ where: { id: transactionId } });
+  await resyncExpense(userId, txn);
+  return true;
+}
+
+export async function listCategoriesForUser(
+  userId: string,
+  type: "income" | "expense",
+): Promise<{ id: string; name: string }[]> {
+  return prisma.category.findMany({
+    where: {
+      OR: [
+        { userId, type: { in: [type, "both"] } },
+        { userId: null, isDefault: true, type: { in: [type, "both"] } },
+      ],
+    },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+    take: 20,
+  });
+}
+
+export async function listPocketsForUser(
+  userId: string,
+): Promise<{ id: string; name: string }[]> {
+  return prisma.pocket.findMany({
+    where: { userId },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+    take: 20,
+  });
+}
