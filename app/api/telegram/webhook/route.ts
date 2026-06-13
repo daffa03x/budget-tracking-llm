@@ -26,6 +26,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // handleUpdate routes message, callback_query (button taps), and replies.
   try {
     await handleUpdate(update);
   } catch (err) {

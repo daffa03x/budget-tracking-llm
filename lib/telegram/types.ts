@@ -33,9 +33,18 @@ export type TelegramMessage = {
   photo?: TelegramPhotoSize[];
   document?: TelegramDocument;
   caption?: string;
+  reply_to_message?: TelegramMessage;
+};
+
+export type TelegramCallbackQuery = {
+  id: string;
+  from: TelegramFrom;
+  message?: TelegramMessage;
+  data?: string;
 };
 
 export type TelegramUpdate = {
   update_id: number;
   message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
 };

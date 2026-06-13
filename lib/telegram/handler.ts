@@ -4,6 +4,7 @@ import { parseMessage, formatRupiah } from "./parser";
 import { transcribeAudio } from "./stt";
 import { extractTransactionFromText, extractTransactionFromImage } from "./llm";
 import { resolveCategory, resolvePocket } from "./resolver";
+import { savedConfirmKeyboard, draftConfirmKeyboard, draftSaveOnlyKeyboard } from "./keyboards";
 import {
   generateDailyReport,
   generateWeeklyReport,
@@ -12,7 +13,17 @@ import {
   deleteLastTransaction,
   getPocketBalances,
 } from "./report";
-import { createTransactionFromBot, getLinkedUserId } from "@/lib/services/telegram.service";
+import {
+  createTransactionFromBot,
+  getLinkedUserId,
+  createInteraction,
+  findInteractionByPrompt,
+  clearInteractionPending,
+  updateTransactionAmount,
+  updateInteractionPayload,
+  type DraftItem,
+} from "@/lib/services/telegram.service";
+import { handleCallbackQuery } from "./callbacks";
 import { prisma } from "@/lib/prisma";
 import type { ParsedTransaction, TelegramFrom, TelegramUpdate } from "./types";
 
@@ -41,6 +52,11 @@ const HELP =
   `/riwayat [n] · /hapus · /status`;
 
 export async function handleUpdate(update: TelegramUpdate): Promise<void> {
+  if (update.callback_query) {
+    await handleCallbackQuery(update.callback_query);
+    return;
+  }
+
   const msg = update.message;
   if (!msg) return;
 
@@ -48,6 +64,11 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
   const chatIdStr = String(chatId);
 
   try {
+    if (msg.text && msg.reply_to_message) {
+      const handled = await handleAmountReply(chatId, chatIdStr, msg.text, msg.reply_to_message.message_id);
+      if (handled) return;
+    }
+
     if (msg.text?.startsWith("/")) {
       await handleCommand(chatId, chatIdStr, msg.text, msg.from);
       return;
@@ -119,7 +140,9 @@ async function handleText(chatId: number, chatIdStr: string, text: string): Prom
   try {
     const llmResult = await extractTransactionFromText(text);
     if (llmResult) {
-      await saveAndConfirm(chatId, chatIdStr, userId, llmResult, "text", text);
+      await previewDraft(chatId, chatIdStr, userId, [
+        { type: llmResult.type, amount: llmResult.amount, category: llmResult.category, pocketName: llmResult.pocketName },
+      ], "🤖 <b>Saya tangkap transaksi ini:</b>", "text");
       return;
     }
   } catch {
@@ -179,7 +202,9 @@ async function handleVoice(
   }
 
   if (llmResult) {
-    await saveAndConfirm(chatId, chatIdStr, userId, llmResult, "voice", transcript);
+    await previewDraft(chatId, chatIdStr, userId, [
+      { type: llmResult.type, amount: llmResult.amount, category: llmResult.category, pocketName: llmResult.pocketName },
+    ], "🎙️ <b>Saya tangkap transaksi ini:</b>", "voice");
     return;
   }
 
@@ -219,39 +244,81 @@ async function handleImage(
     return;
   }
 
-  const lines = ["📷 <b>Struk terbaca!</b>", ""];
-  let total = 0;
-  let savedCount = 0;
+  const items: DraftItem[] = results.map((r) => ({
+    type: "expense",
+    amount: r.amount,
+    category: r.category,
+    pocketName: null,
+  }));
+  await previewDraft(chatId, chatIdStr, userId, items, "📷 <b>Struk terbaca!</b>", "image");
+}
 
-  for (const r of results) {
-    try {
-      const categoryId = await resolveCategory(userId, r.category, r.type);
-      await createTransactionFromBot({
-        type: r.type,
-        amount: r.amount,
-        categoryId,
-        pocketId: null,
-        source: "image",
-        rawInput: caption ?? null,
-        telegramChatId: chatIdStr,
-        userId,
-      });
-      lines.push(`💸 ${r.category} — ${formatRupiah(r.amount)}`);
-      total += r.amount;
-      savedCount++;
-    } catch (err) {
-      console.error("[Bot] handlePhoto item failed:", err);
-      lines.push(`⚠️ ${r.category} — gagal disimpan`);
+async function handleAmountReply(
+  chatId: number,
+  chatIdStr: string,
+  text: string,
+  replyToMessageId: number,
+): Promise<boolean> {
+  const interaction = await findInteractionByPrompt(chatIdStr, replyToMessageId);
+  if (!interaction) return false;
+
+  const parsed = parseMessage(`pengeluaran x ${text}`); // reuse amount parser
+  const amount = parsed?.amount ?? null;
+  if (amount === null) {
+    await sendMessage(chatId, "Nominal tidak dikenali. Ketik angka seperti 50rb atau 50000.");
+    return true;
+  }
+
+  await clearInteractionPending(chatIdStr, interaction.messageId);
+
+  if (interaction.kind === "saved" && interaction.transactionId) {
+    const ok = await updateTransactionAmount(interaction.userId, interaction.transactionId, amount);
+    await sendMessage(chatId, ok ? `✅ Nominal diperbarui: ${formatRupiah(amount)}` : "⚠️ Transaksi ini sudah tidak ada.");
+  } else {
+    const items = (interaction.payload as DraftItem[] | null) ?? [];
+    if (items.length === 1) {
+      await updateInteractionPayload(chatIdStr, interaction.messageId, [{ ...items[0], amount }]);
     }
+    await sendMessage(chatId, `Nominal draft jadi ${formatRupiah(amount)}. Tekan ✅ Simpan di pesan sebelumnya untuk menyimpan.`);
   }
+  return true;
+}
 
-  if (savedCount === 0) {
-    await sendMessage(chatId, "Gagal menyimpan transaksi dari struk. Coba kirim ulang.");
-    return;
+async function previewDraft(
+  chatId: number,
+  chatIdStr: string,
+  userId: string,
+  items: DraftItem[],
+  headline: string,
+  source: "text" | "voice" | "image",
+): Promise<void> {
+  const lines = [headline, ""];
+  let total = 0;
+  for (const it of items) {
+    const icon = it.type === "income" ? "💰" : "💸";
+    lines.push(`${icon} ${it.category} — ${formatRupiah(it.amount)}`);
+    total += it.amount;
   }
+  if (items.length > 1) {
+    lines.push("", `Total: ${formatRupiah(total)} (${items.length} transaksi)`);
+  }
+  lines.push("", "Simpan transaksi ini?");
 
-  lines.push("", `Total: ${formatRupiah(total)} (${savedCount} dari ${results.length} transaksi dicatat)`);
-  await sendMessage(chatId, lines.join("\n"));
+  // Single-item drafts get the full edit toolkit; multi-item drafts (multi-
+  // receipt photos) only get save/cancel (per-item editing is out of scope).
+  const keyboard = items.length === 1 ? draftConfirmKeyboard() : draftSaveOnlyKeyboard();
+
+  const messageId = await sendMessage(chatId, lines.join("\n"), { reply_markup: keyboard });
+  if (messageId !== null) {
+    await createInteraction({
+      chatId: chatIdStr,
+      messageId,
+      userId,
+      kind: "draft",
+      source,
+      payload: items,
+    });
+  }
 }
 
 async function saveAndConfirm(
@@ -268,7 +335,7 @@ async function saveAndConfirm(
     pocketId = await resolvePocket(userId, parsed.pocketName);
   }
 
-  await createTransactionFromBot({
+  const created = await createTransactionFromBot({
     type: parsed.type,
     amount: parsed.amount,
     categoryId,
@@ -284,10 +351,23 @@ async function saveAndConfirm(
   const pocketLine = pocketId ? `\n💼 Kantong: ${parsed.pocketName}` : "";
   const date = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Jakarta" });
 
-  await sendMessage(
+  const messageId = await sendMessage(
     chatId,
     `✅ Tercatat!\n\n${typeIcon} ${typeLabel}: ${parsed.category}\n💵 ${formatRupiah(parsed.amount)}${pocketLine}\n📅 ${date}`,
+    { reply_markup: savedConfirmKeyboard() },
   );
+
+  if (messageId !== null) {
+    await createInteraction({
+      chatId: chatIdStr,
+      messageId,
+      userId,
+      kind: "saved",
+      source,
+      transactionId: created.id,
+      payload: [{ type: parsed.type, amount: parsed.amount, category: parsed.category, pocketName: parsed.pocketName }],
+    });
+  }
 }
 
 async function handleCommand(
