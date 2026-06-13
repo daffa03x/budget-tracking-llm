@@ -4,6 +4,7 @@ import { parseMessage, formatRupiah } from "./parser";
 import { transcribeAudio } from "./stt";
 import { extractTransactionFromText, extractTransactionFromImage } from "./llm";
 import { resolveCategory, resolvePocket } from "./resolver";
+import { savedConfirmKeyboard } from "./keyboards";
 import {
   generateDailyReport,
   generateWeeklyReport,
@@ -12,7 +13,7 @@ import {
   deleteLastTransaction,
   getPocketBalances,
 } from "./report";
-import { createTransactionFromBot, getLinkedUserId } from "@/lib/services/telegram.service";
+import { createTransactionFromBot, getLinkedUserId, createInteraction } from "@/lib/services/telegram.service";
 import { prisma } from "@/lib/prisma";
 import type { ParsedTransaction, TelegramFrom, TelegramUpdate } from "./types";
 
@@ -268,7 +269,7 @@ async function saveAndConfirm(
     pocketId = await resolvePocket(userId, parsed.pocketName);
   }
 
-  await createTransactionFromBot({
+  const created = await createTransactionFromBot({
     type: parsed.type,
     amount: parsed.amount,
     categoryId,
@@ -284,10 +285,23 @@ async function saveAndConfirm(
   const pocketLine = pocketId ? `\n💼 Kantong: ${parsed.pocketName}` : "";
   const date = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Jakarta" });
 
-  await sendMessage(
+  const messageId = await sendMessage(
     chatId,
     `✅ Tercatat!\n\n${typeIcon} ${typeLabel}: ${parsed.category}\n💵 ${formatRupiah(parsed.amount)}${pocketLine}\n📅 ${date}`,
+    { reply_markup: savedConfirmKeyboard() },
   );
+
+  if (messageId !== null) {
+    await createInteraction({
+      chatId: chatIdStr,
+      messageId,
+      userId,
+      kind: "saved",
+      source,
+      transactionId: created.id,
+      payload: [{ type: parsed.type, amount: parsed.amount, category: parsed.category, pocketName: parsed.pocketName }],
+    });
+  }
 }
 
 async function handleCommand(
