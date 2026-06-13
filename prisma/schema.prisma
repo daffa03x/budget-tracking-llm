@@ -198,6 +198,16 @@ model AccountConnection {
   @@index([recipientId, status])
 }
 
+// Records Telegram update_ids already processed so webhook retries
+// (Telegram resends an update if it doesn't get a fast 200) don't create
+// duplicate transactions on slow voice/image processing.
+model TelegramProcessedUpdate {
+  updateId  BigInt   @id
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 model TelegramLink {
   id        String   @id @default(cuid())
   token     String   @unique

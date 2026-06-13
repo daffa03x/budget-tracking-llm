@@ -1,6 +1,7 @@
 // app/api/telegram/webhook/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { handleUpdate } from "@/lib/telegram/handler";
+import { claimTelegramUpdate } from "@/lib/services/telegram.service";
 import type { TelegramUpdate } from "@/lib/telegram/types";
 
 export const runtime = "nodejs";
@@ -14,6 +15,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const update = (await req.json()) as TelegramUpdate;
+
+  // Skip updates we've already handled — Telegram resends an update if it
+  // doesn't get a fast 200, which would otherwise double-record slow
+  // voice/image transactions.
+  if (typeof update.update_id === "number") {
+    const fresh = await claimTelegramUpdate(update.update_id);
+    if (!fresh) {
+      return NextResponse.json({ ok: true, duplicate: true });
+    }
+  }
 
   try {
     await handleUpdate(update);

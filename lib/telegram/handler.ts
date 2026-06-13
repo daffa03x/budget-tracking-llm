@@ -59,13 +59,41 @@ export async function handleUpdate(update: TelegramUpdate): Promise<void> {
     }
 
     if (msg.voice) {
-      await handleVoice(chatId, chatIdStr, msg.voice.file_id);
+      await handleVoice(chatId, chatIdStr, msg.voice.file_id, msg.voice.mime_type ?? "audio/ogg");
+      return;
+    }
+
+    if (msg.audio) {
+      await handleVoice(chatId, chatIdStr, msg.audio.file_id, msg.audio.mime_type ?? "audio/mpeg");
+      return;
+    }
+
+    if (msg.video_note) {
+      await handleVoice(chatId, chatIdStr, msg.video_note.file_id, "video/mp4");
       return;
     }
 
     if (msg.photo && msg.photo.length > 0) {
       const fileId = msg.photo[msg.photo.length - 1].file_id;
-      await handlePhoto(chatId, chatIdStr, fileId, msg.caption);
+      await handleImage(chatId, chatIdStr, fileId, "image/jpeg", msg.caption);
+      return;
+    }
+
+    // Files sent as documents: receipts (image/PDF) or audio recordings.
+    if (msg.document) {
+      const mime = msg.document.mime_type ?? "";
+      if (mime.startsWith("image/") || mime === "application/pdf") {
+        await handleImage(chatId, chatIdStr, msg.document.file_id, mime, msg.caption);
+        return;
+      }
+      if (mime.startsWith("audio/") || mime.startsWith("video/")) {
+        await handleVoice(chatId, chatIdStr, msg.document.file_id, mime);
+        return;
+      }
+      await sendMessage(
+        chatId,
+        "File ini tidak didukung. Kirim foto/PDF struk, atau voice note. Ketik /help untuk panduan.",
+      );
       return;
     }
 
@@ -102,7 +130,12 @@ async function handleText(chatId: number, chatIdStr: string, text: string): Prom
   await sendMessage(chatId, "Tidak bisa memproses pesan ini sebagai transaksi.\n\nContoh: <code>pengeluaran makan siang 50rb</code>");
 }
 
-async function handleVoice(chatId: number, chatIdStr: string, fileId: string): Promise<void> {
+async function handleVoice(
+  chatId: number,
+  chatIdStr: string,
+  fileId: string,
+  mimeType: string,
+): Promise<void> {
   const userId = await getLinkedUserId(chatIdStr);
   if (!userId) { await sendMessage(chatId, NOT_LINKED); return; }
 
@@ -118,9 +151,14 @@ async function handleVoice(chatId: number, chatIdStr: string, fileId: string): P
 
   let transcript: string;
   try {
-    transcript = await transcribeAudio(buffer);
+    transcript = await transcribeAudio(buffer, mimeType);
   } catch {
     await sendMessage(chatId, "🎙️ Layanan transkripsi sedang sibuk. Coba lagi dalam 1 menit, atau ketik manual.");
+    return;
+  }
+
+  if (!transcript) {
+    await sendMessage(chatId, "🎙️ Suaranya tidak terdengar jelas. Coba rekam ulang di tempat yang lebih sunyi, atau ketik manual.");
     return;
   }
 
@@ -132,23 +170,27 @@ async function handleVoice(chatId: number, chatIdStr: string, fileId: string): P
     return;
   }
 
+  let llmResult: ParsedTransaction | null = null;
   try {
-    const llmResult = await extractTransactionFromText(transcript);
-    if (llmResult) {
-      await saveAndConfirm(chatId, chatIdStr, userId, llmResult, "voice", transcript);
-      return;
-    }
+    llmResult = await extractTransactionFromText(transcript);
   } catch {
-    // fall through
+    await sendMessage(chatId, "🤖 Layanan AI sedang sibuk. Coba lagi sebentar, atau ketik: pengeluaran [kategori] [nominal]");
+    return;
+  }
+
+  if (llmResult) {
+    await saveAndConfirm(chatId, chatIdStr, userId, llmResult, "voice", transcript);
+    return;
   }
 
   await sendMessage(chatId, "Maaf, tidak bisa memahami voice note ini sebagai transaksi.\nCoba format: pengeluaran [kategori] [nominal]");
 }
 
-async function handlePhoto(
+async function handleImage(
   chatId: number,
   chatIdStr: string,
   fileId: string,
+  mimeType: string,
   caption?: string,
 ): Promise<void> {
   const userId = await getLinkedUserId(chatIdStr);
@@ -166,7 +208,7 @@ async function handlePhoto(
 
   let results: ParsedTransaction[];
   try {
-    results = await extractTransactionFromImage(buffer, "image/jpeg", caption);
+    results = await extractTransactionFromImage(buffer, mimeType, caption);
   } catch {
     await sendMessage(chatId, "🤖 Layanan AI sedang sibuk. Coba lagi sebentar.");
     return;

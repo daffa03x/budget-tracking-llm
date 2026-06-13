@@ -46,6 +46,28 @@ export async function createTransactionFromBot(input: BotTransactionInput) {
   return transaction;
 }
 
+// Claims a Telegram update_id for processing. Returns true if this is the first
+// time we've seen it (process it), false if it was already handled (a webhook
+// retry — skip to avoid duplicate transactions). Fails open: on unexpected DB
+// errors we still process, preferring a rare duplicate over a dropped message.
+export async function claimTelegramUpdate(updateId: number): Promise<boolean> {
+  try {
+    await prisma.telegramProcessedUpdate.create({ data: { updateId: BigInt(updateId) } });
+    return true;
+  } catch (err) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code?: string }).code === "P2002"
+    ) {
+      return false; // unique violation → already processed
+    }
+    console.error("[Bot] claimTelegramUpdate failed, processing anyway:", err);
+    return true;
+  }
+}
+
 export async function getLinkedUserId(chatId: string): Promise<string | null> {
   const link = await prisma.telegramLink.findFirst({
     where: { chatId, linked: true },

@@ -3,6 +3,16 @@ import type { ParsedTransaction } from "./types";
 
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
+// Strips ```json ... ``` / ``` ... ``` fences that some model responses wrap
+// JSON in, even when responseMimeType is requested.
+function stripJsonFence(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+}
+
 async function callGemini(parts: unknown[]): Promise<string> {
   const res = await fetch(GEMINI_URL, {
     method: "POST",
@@ -18,9 +28,25 @@ async function callGemini(parts: unknown[]): Promise<string> {
   }
 
   const data = (await res.json()) as {
-    candidates: Array<{ content: { parts: Array<{ text: string }> } }>;
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+      finishReason?: string;
+    }>;
+    promptFeedback?: { blockReason?: string };
   };
-  return data.candidates[0].content.parts[0].text;
+
+  const blockReason = data.promptFeedback?.blockReason;
+  if (blockReason) {
+    throw new Error(`Gemini blocked: ${blockReason}`);
+  }
+
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (typeof text !== "string") {
+    const finish = data.candidates?.[0]?.finishReason ?? "no candidates";
+    throw new Error(`Gemini returned no text (${finish})`);
+  }
+
+  return stripJsonFence(text);
 }
 
 export async function extractTransactionFromText(
@@ -71,15 +97,17 @@ export async function extractTransactionFromImage(
   const base64 = imageBuffer.toString("base64");
   const captionHint = caption ? `Caption dari user: "${caption}"` : "";
 
-  const prompt = `Kamu adalah pembaca struk/receipt belanja. Analisis foto struk ini dan extract informasi transaksi.
+  const prompt = `Kamu adalah pembaca struk/receipt belanja. Analisis foto ini dan extract informasi transaksi.
 
 Rules:
-- Identifikasi TOTAL PEMBAYARAN (bukan subtotal per-item)
-- Semua transaksi dari struk adalah expense
-- Kategori dari nama toko atau jenis belanjaan (contoh: "Groceries", "Makan", "Transportasi")
+- Hasilkan SATU entry per struk, memakai TOTAL PEMBAYARAN struk tersebut (grand total / "Total", bukan subtotal dan bukan harga per-item).
+- Jika dalam foto ada beberapa struk terpisah, buat satu entry untuk tiap struk.
+- JANGAN pecah satu struk menjadi banyak entry per item.
+- Semua transaksi dari struk adalah expense.
+- Kategori dari nama toko atau jenis belanjaan (contoh: "Groceries", "Makan", "Transportasi").
 - ${captionHint}
-- Jika bukan foto struk/receipt, return array kosong
-- Nominal dalam Rupiah (IDR)
+- Jika bukan foto struk/receipt, return array kosong.
+- Nominal dalam Rupiah (IDR), angka murni tanpa titik/koma pemisah.
 
 Respond ONLY with JSON array (no markdown):
 [{"type": "expense", "amount": number, "category": "string"}]
