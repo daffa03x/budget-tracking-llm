@@ -21,7 +21,7 @@ export async function GET(): Promise<NextResponse> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         url: webhookUrl,
-        allowed_updates: ["message"],
+        allowed_updates: ["message", "callback_query"],
         secret_token: secret,
       }),
     });
